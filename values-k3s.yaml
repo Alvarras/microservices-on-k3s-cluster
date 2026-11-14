@@ -1,0 +1,169 @@
+# Copyright 2024 Google LLC
+# Licensed under the Apache License, Version 2.0
+# values-k3s.yaml: Optimized configuration for K3s 3-VM cluster (1 Master, 2 Workers)
+
+images:
+  repository: us-central1-docker.pkg.dev/online-boutique-ci/microservices-demo
+  tag: "v0.10.7"
+
+# Non-aktifkan Google Cloud Operations dan Metadata
+googleCloudOperations:
+  profiler: false
+  tracing: false
+  metrics: false
+
+seccompProfile:
+  enable: true
+  type: RuntimeDefault
+
+securityContext:
+  enable: true
+
+# Frontend Optimization: Matikan LoadBalancer eksternal agar tidak bentrok dengan Traefik Ingress
+frontend:
+  create: true
+  name: frontend
+  externalService: false
+  platform: onprem
+  singleSharedSession: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# Load Generator: Dialokasikan lebih efisien
+loadGenerator:
+  create: true
+  name: loadgenerator
+  checkFrontendInitContainer: true
+  resources:
+    requests:
+      cpu: 150m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+# Adservice (Java): Diberi alokasi memori yang cukup untuk JVM
+adService:
+  create: true
+  name: adservice
+  resources:
+    requests:
+      cpu: 150m
+      memory: 180Mi
+    limits:
+      cpu: 300m
+      memory: 350Mi
+
+# Cart Database (In-Cluster Redis)
+cartDatabase:
+  type: redis
+  connectionString: "redis-cart:6379"
+  inClusterRedis:
+    create: true
+    name: redis-cart
+    publicRepository: true
+
+cartService:
+  create: true
+  name: cartservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+checkoutService:
+  create: true
+  name: checkoutservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+currencyService:
+  create: true
+  name: currencyservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+emailService:
+  create: true
+  name: emailservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+paymentService:
+  create: true
+  name: paymentservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+productCatalogService:
+  create: true
+  name: productcatalogservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+recommendationService:
+  create: true
+  name: recommendationservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 180Mi
+    limits:
+      cpu: 200m
+      memory: 350Mi
+
+shippingService:
+  create: true
+  name: shippingservice
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+networkPolicies:
+  create: false
+
+sidecars:
+  create: false
+
+authorizationPolicies:
+  create: false
+
+opentelemetryCollector:
+  create: false

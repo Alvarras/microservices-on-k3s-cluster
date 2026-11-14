@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server-ingress
+  namespace: argocd
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  rules:
+  # Opsi 1: Akses via Subpath atau Host (ganti argocd.local dengan domain / nip.io Anda)
+  - host: argocd.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: argocd-server
+            port:
+              number: 80
+  # Opsi 2: Akses tanpa host (catch-all port 80 khusus namespace argocd jika dipisah path)
+  # - http:
+  #     paths:
+  #     - path: /argocd
+  #       pathType: Prefix
+  #       backend:
+  #         service:
+  #           name: argocd-server
+  #           port:
+  #             number: 80
