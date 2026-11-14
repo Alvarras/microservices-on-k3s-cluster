@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-microservices
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: https://github.com/Alvarras/microservices-on-k3s-cluster.git
+  name: microservices-on-k3s-cluster
+  # Jika repository bersifat Private (Privat di GitHub):
+  # Hilangkan tanda '#' di bawah dan isi username serta Personal Access Token (PAT):
+  # username: Alvarras
+  # password: <GITHUB_PERSONAL_ACCESS_TOKEN_ghp_xxxx>

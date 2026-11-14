@@ -7,6 +7,16 @@ configs:
     # Mengizinkan koneksi HTTP internal tanpa TLS (mencegah error 502 pada Ingress Traefik & memudahkan akses NodePort)
     server.insecure: true
 
+  # Pendaftaran Repositori Git Otomatis di ArgoCD
+  repositories:
+    microservices-cluster:
+      url: https://github.com/Alvarras/microservices-on-k3s-cluster.git
+      name: microservices-on-k3s-cluster
+      type: git
+      # Jika repo privat di GitHub, tambahkan field di bawah ini:
+      # username: Alvarras
+      # password: <GITHUB_PERSONAL_ACCESS_TOKEN_ghp_xxxx>
+
 server:
   # Konfigurasi eksposur langsung via NodePort
   service:
