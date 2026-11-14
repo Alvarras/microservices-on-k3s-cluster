@@ -24,8 +24,9 @@ frontend:
   create: true
   name: frontend
   externalService: false
-  platform: onprem
-  singleSharedSession: false
+  platform: onprem           # Opsi: onprem, aws, azure, gcp, alibaba, local
+  frontendMessage: ""        # Isi pesan teks di sini untuk menampilkan banner di atas halaman toko!
+  cymbalBranding: false      # Ubah ke true jika ingin mengubah branding logo toko menjadi Cymbal Shops
   resources:
     requests:
       cpu: 100m

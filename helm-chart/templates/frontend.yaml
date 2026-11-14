@@ -110,6 +110,10 @@ spec:
             value: "{{ .Values.shoppingAssistantService.name }}:80"
           - name: ENV_PLATFORM
             value: {{ .Values.frontend.platform | quote }}
+          {{- if .Values.frontend.frontendMessage }}
+          - name: FRONTEND_MESSAGE
+            value: {{ .Values.frontend.frontendMessage | quote }}
+          {{- end }}
           {{- if .Values.opentelemetryCollector.create }}
           - name: COLLECTOR_SERVICE_ADDR
             value: "{{ .Values.opentelemetryCollector.name }}:4317"
