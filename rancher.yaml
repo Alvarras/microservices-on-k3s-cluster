@@ -1,0 +1,51 @@
+services:
+  # ==============================================================================
+  # 1. RANCHER SERVER
+  # ==============================================================================
+  rancher:
+    image: rancher/rancher:v2.15.3
+    container_name: rancher-server
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./rancher-data:/var/lib/rancher
+    environment:
+      - CATTLE_BOOTSTRAP_PASSWORD=PasswordAdminRancher123!
+
+  # ==============================================================================
+  # 2. L4 RAW TCP TUNNEL (bore.pub)
+  # Mengatasi kendala Hairpin NAT pada hypervisor iximiuz labs.
+  # Menggunakan dynamic port agar tidak terjadi collision port dengan user lain.
+  # ==============================================================================
+  bore-tunnel:
+    image: ekzhang/bore:latest
+    container_name: bore-tunnel
+    restart: unless-stopped
+    network_mode: host
+    command: local 443 --to bore.pub
+    depends_on:
+      - rancher
+
+  # ==============================================================================
+  # 3. RANCHER AUTO-SYNC SIDECAR
+  # Otomatisasi 100%:
+  # 1. Mendeteksi port aktif dari bore-tunnel secara otomatis via docker socket.
+  # 2. Mengatur setting 'server-url' di Rancher secara otomatis.
+  # 3. Mengambil versi riil downstream cluster dan mem-patch status cluster
+  #    sehingga kolom Kubernetes Version otomatis muncul di Rancher Dashboard.
+  # ==============================================================================
+  rancher-auto-sync:
+    image: python:3-alpine
+    container_name: rancher-auto-sync
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./auto-sync.py:/auto-sync.py:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: python3 -u /auto-sync.py
+    depends_on:
+      - rancher
+      - bore-tunnel
