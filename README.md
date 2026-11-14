@@ -13,31 +13,37 @@ Below is an overview of the live environment, showcasing the deployed storefront
 
 ### 1. Online Boutique Web Storefront
 
-The user-facing e-commerce application serving products, shopping cart operations, and currency conversion:
+The user-facing e-commerce application serving products, shopping cart operations, and currency conversion.
 
-| Storefront Homepage | Product & Order Details |
-|---|---|
-| ![Online Boutique Home](assets/home.png) | ![Product Details](assets/detail.png) |
+#### Storefront Homepage
+![Online Boutique Storefront Home](assets/home.png)
+
+#### Product & Order Details
+![Online Boutique Product and Order Details](assets/detail.png)
 
 ---
 
 ### 2. ArgoCD GitOps Engine
 
-Continuous synchronization and health tracking across all 11 microservices:
+Continuous synchronization and health tracking across all 11 microservices.
 
-| ArgoCD Application Status | Microservices Resource & Topology Tree |
-|---|---|
-| ![ArgoCD Application Dashboard](assets/argocd-app.png) | ![ArgoCD Resource Tree](assets/resource.png) |
+#### ArgoCD Application Dashboard
+![ArgoCD Application Dashboard](assets/argocd-app.png)
+
+#### Microservices Resource & Topology Tree
+![ArgoCD Resource and Topology Tree](assets/resource.png)
 
 ---
 
 ### 3. Rancher Cluster Management (iximiuz Labs)
 
-Centralized cluster monitoring and node workload visibility:
+Centralized cluster monitoring and node workload visibility.
 
-| Rancher Management Dashboard | Cluster Nodes & Health Details |
-|---|---|
-| ![Rancher Overview](assets/rancher.png) | ![Rancher Cluster Details](assets/detail-rancher.png) |
+#### Rancher Management Dashboard
+![Rancher Management Dashboard](assets/rancher.png)
+
+#### Cluster Nodes & Health Details
+![Rancher Cluster Nodes and Health Details](assets/detail-rancher.png)
 
 ---
 
