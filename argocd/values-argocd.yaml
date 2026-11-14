@@ -1,0 +1,68 @@
+## values-argocd.yaml - Optimasi ArgoCD Helm Chart untuk K3s 3-VM Cluster
+global:
+  domain: argocd.local
+
+configs:
+  params:
+    # Mengizinkan koneksi HTTP internal tanpa TLS (mencegah error 502 pada Ingress Traefik & memudahkan akses NodePort)
+    server.insecure: true
+
+server:
+  # Konfigurasi eksposur langsung via NodePort
+  service:
+    type: NodePort
+    nodePortHttp: 30085
+    nodePortHttps: 30443
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      cpu: 150m
+      memory: 200Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 150Mi
+    limits:
+      cpu: 250m
+      memory: 350Mi
+
+controller:
+  resources:
+    requests:
+      cpu: 150m
+      memory: 250Mi
+    limits:
+      cpu: 300m
+      memory: 500Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 50m
+      memory: 128Mi
+
+# Non-aktifkan Dex jika hanya butuh akun admin lokal (menghemat ~100MB RAM)
+dex:
+  enabled: false
+
+# Non-aktifkan Notifications jika tidak butuh alert webhook (menghemat ~80MB RAM)
+notifications:
+  enabled: false
+
+# ApplicationSet Controller
+applicationSet:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
