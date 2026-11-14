@@ -1,170 +1,259 @@
-<!-- <p align="center">
-<img src="/src/frontend/static/icons/Hipster_HeroLogoMaroon.svg" width="300" alt="Online Boutique" />
-</p> -->
-![Continuous Integration](https://github.com/GoogleCloudPlatform/microservices-demo/workflows/Continuous%20Integration%20-%20Main/Release/badge.svg)
+# GitOps Deployment of Online Boutique on K3s Cluster
 
-**Online Boutique** is a cloud-first microservices demo application.  The application is a
-web-based e-commerce app where users can browse items, add them to the cart, and purchase them.
+This project implements a production-grade **GitOps continuous delivery workflow** using **ArgoCD** to deploy the **Online Boutique** microservices application onto a dedicated **K3s Kubernetes cluster**.
 
-Google uses this application to demonstrate how developers can modernize enterprise applications using Google Cloud products, including: [Google Kubernetes Engine (GKE)](https://cloud.google.com/kubernetes-engine), [Cloud Service Mesh (CSM)](https://cloud.google.com/service-mesh), [gRPC](https://grpc.io/), [Cloud Operations](https://cloud.google.com/products/operations), [Spanner](https://cloud.google.com/spanner), [Memorystore](https://cloud.google.com/memorystore), [AlloyDB](https://cloud.google.com/alloydb), and [Gemini](https://ai.google.dev/). This application works on any Kubernetes cluster.
+> **Application Source:**
+> The underlying microservices demo application is sourced directly from [Google Cloud Platform Microservices Demo](https://github.com/GoogleCloudPlatform/microservices-demo).
 
-If you’re using this demo, please **★Star** this repository to show your interest!
+---
 
-**Note to Googlers:** Please fill out the form at [go/microservices-demo](http://go/microservices-demo).
+## 1. Cluster Architecture & Sizing Specifications
 
-## Architecture
+The target environment is built on a 3-Virtual Machine (VM) topology running lightweight **K3s Kubernetes**:
 
-**Online Boutique** is composed of 11 microservices written in different
-languages that talk to each other over gRPC.
+| Node Name | Node Role | vCPU | Memory (RAM) | Responsibilities |
+|---|---|---|---|---|
+| `cplane-01` (or `k3s-master`) | **Control Plane** | 2 vCPU | 3 GB RAM | K3s Server, SQLite/Kine datastore, CoreDNS, Traefik |
+| `node-01` (or `k3s-worker-1`) | **Worker Node 1** | 3 vCPU | 5 GB RAM | Online Boutique microservices & ArgoCD workloads |
+| `node-02` (or `k3s-worker-2`) | **Worker Node 2** | 3 vCPU | 5 GB RAM | Online Boutique microservices & ArgoCD workloads |
+| `dev-machine` | **Bastion / Client** | - | - | Execution host for `kubectl`, `helm`, `git`, and `labctl` |
 
-[![Architecture of
-microservices](/docs/img/architecture-diagram.png)](/docs/img/architecture-diagram.png)
+### Capacity Breakdown
 
-Find **Protocol Buffers Descriptions** at the [`./protos` directory](/protos).
+* **Total Worker Layer Capacity:** 6 vCPU and 10 GB RAM across 2 worker nodes.
+* **Control Plane Isolation:** The control plane is isolated with a taint (`CriticalAddonsOnly=true:NoSchedule`) so that application workloads only run on the worker layer.
+* **Workload Footprint:**
+  * Online Boutique (11 microservices + Redis + Load Generator): ~1.57 vCPU requests / ~1.31 GB RAM requests.
+  * ArgoCD Stack (Server, Repo Server, Controller, Redis): ~0.33 vCPU requests / ~0.56 GB RAM requests.
+  * Operating System + K3s Agent overhead: ~0.60 vCPU / ~1.40 GB RAM.
+* **Total Resource Utilization:** ~2.50 vCPU (~42%) and ~3.27 GB RAM (~33%).
+* **Remaining Free Headroom:** ~3.50 vCPU and ~6.73 GB RAM (~67% free) available for traffic scaling and high availability.
 
-| Service                                              | Language      | Description                                                                                                                       |
-| ---------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| [frontend](/src/frontend)                           | Go            | Exposes an HTTP server to serve the website. Does not require signup/login and generates session IDs for all users automatically. |
-| [cartservice](/src/cartservice)                     | C#            | Stores the items in the user's shopping cart in Redis and retrieves it.                                                           |
-| [productcatalogservice](/src/productcatalogservice) | Go            | Provides the list of products from a JSON file and ability to search products and get individual products.                        |
-| [currencyservice](/src/currencyservice)             | Node.js       | Converts one money amount to another currency. Uses real values fetched from European Central Bank. It's the highest QPS service. |
-| [paymentservice](/src/paymentservice)               | Node.js       | Charges the given credit card info (mock) with the given amount and returns a transaction ID.                                     |
-| [shippingservice](/src/shippingservice)             | Go            | Gives shipping cost estimates based on the shopping cart. Ships items to the given address (mock)                                 |
-| [emailservice](/src/emailservice)                   | Python        | Sends users an order confirmation email (mock).                                                                                   |
-| [checkoutservice](/src/checkoutservice)             | Go            | Retrieves user cart, prepares order and orchestrates the payment, shipping and the email notification.                            |
-| [recommendationservice](/src/recommendationservice) | Python        | Recommends other products based on what's given in the cart.                                                                      |
-| [adservice](/src/adservice)                         | Java          | Provides text ads based on given context words.                                                                                   |
-| [loadgenerator](/src/loadgenerator)                 | Python/Locust | Continuously sends requests imitating realistic user shopping flows to the frontend.                                              |
+---
 
-## Screenshots
+## 2. Prerequisites
 
-| Home Page                                                                                                         | Checkout Screen                                                                                                    |
-| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| [![Screenshot of store homepage](/docs/img/online-boutique-frontend-1.png)](/docs/img/online-boutique-frontend-1.png) | [![Screenshot of checkout screen](/docs/img/online-boutique-frontend-2.png)](/docs/img/online-boutique-frontend-2.png) |
+Ensure you have the following requirements satisfied:
 
-## Quickstart (GKE)
+* Running K3s cluster matching the specifications above.
+* Command-line utilities installed on your management machine: `kubectl` (v1.28+), `helm` (v3.12+), and `git`.
+* Firewall ports opened between nodes:
+  * `6443/TCP` (Kubernetes API server)
+  * `10250/TCP` (Kubelet metrics and logs)
+  * `8472/UDP` (Flannel VXLAN overlay network)
+  * `80/TCP` and `443/TCP` (HTTP/HTTPS ingress and NodePort traffic)
 
-1. Ensure you have the following requirements:
-   - [Google Cloud project](https://cloud.google.com/resource-manager/docs/creating-managing-projects#creating_a_project).
-   - Shell environment with `gcloud`, `git`, and `kubectl`.
+---
 
-2. Clone the latest major version.
+## 3. Step-by-Step Deployment Guide
 
-   ```sh
-   git clone --depth 1 --branch v0 https://github.com/GoogleCloudPlatform/microservices-demo.git
-   cd microservices-demo/
-   ```
+Follow these exact steps to deploy ArgoCD via Helm and roll out the Online Boutique application.
 
-   The `--depth 1` argument skips downloading git history.
+### Step 3.1: Add the Official Argo Helm Repository
 
-3. Set the Google Cloud project and region and ensure the Google Kubernetes Engine API is enabled.
+Add the Argo repository:
 
-   ```sh
-   export PROJECT_ID=<PROJECT_ID>
-   export REGION=us-central1
-   gcloud services enable container.googleapis.com \
-     --project=${PROJECT_ID}
-   ```
+```bash
+helm repo add argo https://argoproj.github.io/argo-helm
+```
 
-   Substitute `<PROJECT_ID>` with the ID of your Google Cloud project.
+Update your local Helm chart index:
 
-4. Create a GKE cluster and get the credentials for it.
+```bash
+helm repo update
+```
 
-   ```sh
-   gcloud container clusters create-auto online-boutique \
-     --project=${PROJECT_ID} --region=${REGION} \
-     --labels dev-tutorial=online-boutique
-   ```
+---
 
-   Creating the cluster may take a few minutes.
+### Step 3.2: Install and Configure ArgoCD via Helm
 
-5. Deploy Online Boutique to the cluster.
+Install ArgoCD into the dedicated `argocd` namespace using the optimized values file `argocd/values-argocd.yaml`:
 
-   ```sh
-   kubectl apply -f ./release/kubernetes-manifests.yaml
-   ```
+```bash
+helm upgrade --install argocd argo/argo-cd --namespace argocd --create-namespace -f argocd/values-argocd.yaml
+```
 
-6. Wait for the pods to be ready.
+Verify that all ArgoCD pods are running:
 
-   ```sh
-   kubectl get pods
-   ```
+```bash
+kubectl get pods -n argocd -o wide
+```
 
-   After a few minutes, you should see the Pods in a `Running` state:
+Verify the ArgoCD server service is exposed via NodePort:
 
-   ```
-   NAME                                     READY   STATUS    RESTARTS   AGE
-   adservice-76bdd69666-ckc5j               1/1     Running   0          2m58s
-   cartservice-66d497c6b7-dp5jr             1/1     Running   0          2m59s
-   checkoutservice-666c784bd6-4jd22         1/1     Running   0          3m1s
-   currencyservice-5d5d496984-4jmd7         1/1     Running   0          2m59s
-   emailservice-667457d9d6-75jcq            1/1     Running   0          3m2s
-   frontend-6b8d69b9fb-wjqdg                1/1     Running   0          3m1s
-   loadgenerator-665b5cd444-gwqdq           1/1     Running   0          3m
-   paymentservice-68596d6dd6-bf6bv          1/1     Running   0          3m
-   productcatalogservice-557d474574-888kr   1/1     Running   0          3m
-   recommendationservice-69c56b74d4-7z8r5   1/1     Running   0          3m1s
-   redis-cart-5f59546cdd-5jnqf              1/1     Running   0          2m58s
-   shippingservice-6ccc89f8fd-v686r         1/1     Running   0          2m58s
-   ```
+```bash
+kubectl get svc argocd-server -n argocd
+```
 
-7. Access the web frontend in a browser using the frontend's external IP.
+---
 
-   ```sh
-   kubectl get service frontend-external | awk '{print $4}'
-   ```
+### Step 3.3: Retrieve the Initial ArgoCD Admin Password
 
-   Visit `http://EXTERNAL_IP` in a web browser to access your instance of Online Boutique.
+Extract the automatically generated initial admin password:
 
-8. Congrats! You've deployed the default Online Boutique. To deploy a different variation of Online Boutique (e.g., with Google Cloud Operations tracing, Istio, etc.), see [Deploy Online Boutique variations with Kustomize](#deploy-online-boutique-variations-with-kustomize).
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
 
-9. Once you are done with it, delete the GKE cluster.
+> **Default Username:** `admin`
 
-   ```sh
-   gcloud container clusters delete online-boutique \
-     --project=${PROJECT_ID} --region=${REGION}
-   ```
+---
 
-   Deleting the cluster may take a few minutes.
+### Step 3.4: Register the Git Repository in ArgoCD
 
-## Additional deployment options
+Apply the declarative repository secret to register your Git repository into ArgoCD:
 
-- **Terraform**: [See these instructions](/terraform) to learn how to deploy Online Boutique using [Terraform](https://www.terraform.io/intro).
-- **Istio / Cloud Service Mesh**: [See these instructions](/kustomize/components/service-mesh-istio/README.md) to deploy Online Boutique alongside an Istio-backed service mesh.
-- **Non-GKE clusters (Minikube, Kind, etc)**: See the [Development guide](/docs/development-guide.md) to learn how you can deploy Online Boutique on non-GKE clusters.
-- **AI assistant using Gemini**: [See these instructions](/kustomize/components/shopping-assistant/README.md) to deploy a Gemini-powered AI assistant that suggests products to purchase based on an image.
-- **And more**: The [`/kustomize` directory](/kustomize) contains instructions for customizing the deployment of Online Boutique with other variations.
+```bash
+kubectl apply -f argocd/repository.yaml
+```
 
-## Documentation
+Verify the repository connection status using the ArgoCD CLI:
 
-- [Development](/docs/development-guide.md) to learn how to run and develop this app locally.
+```bash
+argocd repo list
+```
 
-## Demos featuring Online Boutique
+---
 
-- [Security hardening of the OnlineBoutique sample apps with the Docker Hardened Images (DHI)](https://medium.com/google-cloud/security-hardening-of-the-onlineboutique-sample-apps-with-docker-hardened-images-dhi-ca1fad348343)
-- [alpine, distroless or scratch?](https://medium.com/google-cloud/alpine-distroless-or-scratch-caac35250e0b)
-- [Platform Engineering in action: Deploy the Online Boutique sample apps with Score and Humanitec](https://medium.com/p/d99101001e69)
-- [The new Kubernetes Gateway API with Istio and Anthos Service Mesh (ASM)](https://medium.com/p/9d64c7009cd)
-- [Use Azure Redis Cache with the Online Boutique sample on AKS](https://medium.com/p/981bd98b53f8)
-- [Sail Sharp, 8 tips to optimize and secure your .NET containers for Kubernetes](https://medium.com/p/c68ba253844a)
-- [Deploy multi-region application with Anthos and Google cloud Spanner](https://medium.com/google-cloud/a2ea3493ed0)
-- [Use Google Cloud Memorystore (Redis) with the Online Boutique sample on GKE](https://medium.com/p/82f7879a900d)
-- [Use Helm to simplify the deployment of Online Boutique, with a Service Mesh, GitOps, and more!](https://medium.com/p/246119e46d53)
-- [How to reduce microservices complexity with Apigee and Anthos Service Mesh](https://cloud.google.com/blog/products/application-modernization/api-management-and-service-mesh-go-together)
-- [gRPC health probes with Kubernetes 1.24+](https://medium.com/p/b5bd26253a4c)
-- [Use Google Cloud Spanner with the Online Boutique sample](https://medium.com/p/f7248e077339)
-- [Seamlessly encrypt traffic from any apps in your Mesh to Memorystore (redis)](https://medium.com/google-cloud/64b71969318d)
-- [Strengthen your app's security with Cloud Service Mesh and Anthos Config Management](https://cloud.google.com/service-mesh/docs/strengthen-app-security)
-- [From edge to mesh: Exposing service mesh applications through GKE Ingress](https://cloud.google.com/architecture/exposing-service-mesh-apps-through-gke-ingress)
-- [Take the first step toward SRE with Cloud Operations Sandbox](https://cloud.google.com/blog/products/operations/on-the-road-to-sre-with-cloud-operations-sandbox)
-- [Deploying the Online Boutique sample application on Cloud Service Mesh](https://cloud.google.com/service-mesh/docs/onlineboutique-install-kpt)
-- [Anthos Service Mesh Workshop: Lab Guide](https://codelabs.developers.google.com/codelabs/anthos-service-mesh-workshop)
-- [KubeCon EU 2019 - Reinventing Networking: A Deep Dive into Istio's Multicluster Gateways - Steve Dake, Independent](https://youtu.be/-t2BfT59zJA?t=982)
-- Google Cloud Next'18 SF
-  - [Day 1 Keynote](https://youtu.be/vJ9OaAqfxo4?t=2416) showing GKE On-Prem
-  - [Day 3 Keynote](https://youtu.be/JQPOPV_VH5w?t=815) showing Stackdriver
-    APM (Tracing, Code Search, Profiler, Google Cloud Build)
-  - [Introduction to Service Management with Istio](https://www.youtube.com/watch?v=wCJrdKdD6UM&feature=youtu.be&t=586)
-- [Google Cloud Next'18 London – Keynote](https://youtu.be/nIq2pkNcfEI?t=3071)
-  showing Stackdriver Incident Response Management
-- [Microservices demo showcasing Go Micro](https://github.com/go-micro/demo)
+### Step 3.5: Deploy the Online Boutique Application via GitOps
+
+Apply the ArgoCD `Application` custom resource to trigger the automated deployment:
+
+```bash
+kubectl apply -f argocd/argocd-application.yaml
+```
+
+ArgoCD will automatically clone the repository, render the Helm chart from `./helm-chart` with `values-k3s.yaml`, and deploy all 11 microservices into the `default` namespace.
+
+---
+
+### Step 3.6: Configure 1-Minute Automated Git Reconciliation
+
+Configure ArgoCD to check your Git repository for new commits every 60 seconds (1 minute):
+
+```bash
+kubectl patch configmap argocd-cm -n argocd --type merge -p '{"data":{"timeout.reconciliation":"60s","timeout.reconciliation.jitter":"0s"}}'
+```
+
+---
+
+### Step 3.7: Verify Microservices Deployment Health
+
+Verify that all application pods are distributed across the worker nodes:
+
+```bash
+kubectl get pods -n default -o wide
+```
+
+Verify that all internal services are healthy:
+
+```bash
+kubectl get svc -n default
+```
+
+Check real-time resource consumption across all nodes:
+
+```bash
+kubectl top nodes
+```
+
+Check resource utilization per pod:
+
+```bash
+kubectl top pods -n default --sort-by=memory
+```
+
+---
+
+## 4. Environment & Public Exposure Guide
+
+This cluster is hosted on **iximiuz Labs** and managed under **Rancher**.
+
+To access both the **Online Boutique web store** and the **ArgoCD web dashboard** from your local browser, follow the exposure instructions below.
+
+---
+
+### Method A: Public Access via NodePort (Persistent & Recommended)
+
+The NodePort service routes traffic directly through the cluster worker nodes (`node-01` or `node-02`). Use `labctl` to generate a secure public URL.
+
+#### Expose the Online Boutique Storefront (Port 30080)
+
+Apply the frontend NodePort service:
+
+```bash
+kubectl apply -f frontend-nodeport.yaml
+```
+
+Verify the NodePort is bound on port 30080:
+
+```bash
+kubectl get svc frontend-nodeport -n default
+```
+
+Generate the public URL by exposing port 30080 on worker node `node-01`:
+
+```bash
+labctl expose port $PLAY_ID 30080 --machine node-01 --public
+```
+
+Open the generated HTTPS URL in your web browser to browse the Online Boutique storefront.
+
+---
+
+#### Expose the ArgoCD Web Dashboard (Port 30085)
+
+Verify that the `argocd-server` service is running on NodePort 30085:
+
+```bash
+kubectl get svc argocd-server -n argocd
+```
+
+Generate the public URL by exposing port 30085 on worker node `node-01`:
+
+```bash
+labctl expose port $PLAY_ID 30085 --machine node-01 --public
+```
+
+Open the generated HTTPS URL in your browser and log in with username `admin` and the password retrieved in Step 3.3.
+
+---
+
+### Method B: Public Access via Port-Forwarding (On-Demand / Debugging)
+
+Port-forwarding tunnels traffic from Kubernetes services to the `dev-machine` VM.
+
+> **Crucial Rule:**
+> You must always supply the `--address 0.0.0.0` flag with `kubectl port-forward`. If omitted, the port will only listen on `127.0.0.1` inside the VM, preventing `labctl` from creating a public route.
+
+#### Port-Forward the Online Boutique Storefront (Port 8080)
+
+Forward port 80 of the frontend service to port 8080 on the `dev-machine` VM:
+
+```bash
+labctl ssh -m dev-machine $PLAY_ID -- kubectl port-forward --address 0.0.0.0 svc/frontend 8080:80
+```
+
+In a separate terminal, expose the forwarded port 8080 to generate a public URL:
+
+```bash
+labctl expose port $PLAY_ID 8080 --machine dev-machine --public
+```
+
+---
+
+#### Port-Forward the ArgoCD Dashboard (Port 8085)
+
+Forward port 80 of the ArgoCD server to port 8085 on the `dev-machine` VM:
+
+```bash
+labctl ssh -m dev-machine $PLAY_ID -- kubectl port-forward --address 0.0.0.0 -n argocd svc/argocd-server 8085:80
+```
+
+In a separate terminal, expose the forwarded port 8085 to generate a public URL:
+
+```bash
+labctl expose port $PLAY_ID 8085 --machine dev-machine --public
+```
+
+Open the resulting URL in your browser to access the ArgoCD console.
