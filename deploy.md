@@ -41,7 +41,8 @@ SISA KAPASITAS BEBAS (HEADROOM)          : ~3.50 vCPU | ~6.73 GB RAM (~67% SISA 
 
 | File | Fungsi |
 |---|---|
-| **[argocd/values-argocd.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/values-argocd.yaml)** | Konfigurasi Helm resmi `argo/argo-cd` teroptimasi (insecure mode, NodePort 30085 terintegrasi, resource tuning). |
+| **[argocd/values-argocd.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/values-argocd.yaml)** | Konfigurasi Helm resmi `argo/argo-cd` teroptimasi (insecure mode, NodePort 30085, registrasi otomatis repo Git). |
+| **[argocd/repository.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/repository.yaml)** | Manifest Secret deklaratif Kubernetes untuk mendaftarkan repo GitHub ke ArgoCD. |
 | **[argocd/argocd-application.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/argocd-application.yaml)** | Manifest GitOps Application ArgoCD mengarah ke `https://github.com/Alvarras/microservices-on-k3s-cluster.git`. |
 | **[values-k3s.yaml](file:///home/vrs/Projects/rancher/microservices-demo/values-k3s.yaml)** | Konfigurasi Helm Online Boutique teroptimasi untuk K3s. |
 | **[frontend-nodeport.yaml](file:///home/vrs/Projects/rancher/microservices-demo/frontend-nodeport.yaml)** | Service bertipe `NodePort` (port `30080`) untuk mengekspos frontend toko. |
@@ -66,61 +67,11 @@ helm repo update
 
 ---
 
-### Langkah 3.2: Konfigurasi Values Teroptimasi (`argocd/values-argocd.yaml`)
-
-File **[argocd/values-argocd.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/values-argocd.yaml)** telah disiapkan dengan konfigurasi:
-1. `configs.params."server.insecure": true`: Menghindari issue SSL handshake / error 502 pada Ingress Traefik dan mempermudah akses via NodePort.
-2. `server.service.type: NodePort` dengan `nodePortHttp: 30085`: Otomatis membuka port 30085 pada semua node worker.
-3. Penonaktifan Dex dan Notifications untuk menghemat ~180 MB RAM.
-
-Isi ringkas file:
-```yaml
-global:
-  domain: argocd.local
-
-configs:
-  params:
-    server.insecure: true
-
-server:
-  service:
-    type: NodePort
-    nodePortHttp: 30085
-    nodePortHttps: 30443
-  resources:
-    requests: { cpu: 50m, memory: 100Mi }
-    limits: { cpu: 150m, memory: 200Mi }
-
-repoServer:
-  resources:
-    requests: { cpu: 100m, memory: 150Mi }
-    limits: { cpu: 250m, memory: 350Mi }
-
-controller:
-  resources:
-    requests: { cpu: 150m, memory: 250Mi }
-    limits: { cpu: 300m, memory: 500Mi }
-
-redis:
-  resources:
-    requests: { cpu: 25m, memory: 64Mi }
-    limits: { cpu: 50m, memory: 128Mi }
-
-dex:
-  enabled: false
-
-notifications:
-  enabled: false
-```
-
----
-
-### Langkah 3.3: Eksekusi Instalasi Helm ArgoCD
+### Langkah 3.2: Eksekusi Instalasi Helm ArgoCD
 
 Jalankan perintah berikut:
 
 ```bash
-# Jika dijalankan dari dev-machine:
 helm upgrade --install argocd argo/argo-cd \
   --namespace argocd \
   --create-namespace \
@@ -129,12 +80,12 @@ helm upgrade --install argocd argo/argo-cd \
 
 Verifikasi seluruh pod ArgoCD telah berjalan:
 ```bash
-kubectl get pods -n argocd -o wide
+kubectl get pods,svc -n argocd -o wide
 ```
 
 ---
 
-### Langkah 3.4: Ambil Password Awal Login Admin
+### Langkah 3.3: Ambil Password Awal Login Admin
 
 Password awal dibuat otomatis oleh ArgoCD ke dalam Secret:
 
@@ -146,49 +97,104 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 
 ---
 
-## 4. Panduan Akses Web UI ArgoCD & Expose
+## 4. Cara Mendaftarkan Repositori Git di ArgoCD (Connecting Repositories)
 
-Karena Service `argocd-server` sudah otomatis dikonfigurasi sebagai **NodePort 30085** oleh Helm values di atas, Anda dapat mengeksposnya ke publik secara langsung:
+Agar ArgoCD dapat membaca chart dan manifest dari `https://github.com/Alvarras/microservices-on-k3s-cluster.git`, repositori harus terdaftar. Anda dapat memilih salah satu metode di bawah ini:
 
-### Cara 1: Expose via NodePort (Port 30085) - Direkomendasikan
+### Metode 1: Deklaratif via Kubernetes Secret (Direkomendasikan - GitOps Standard)
+
+Terapkan file **[argocd/repository.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/repository.yaml)**:
+
 ```bash
-# Generate link HTTPS publik melalui worker node (node-01)
-labctl expose port $PLAY_ID 30085 --machine node-01 --public
+kubectl apply -f argocd/repository.yaml
 ```
-Salin link yang muncul di browser, lalu login dengan username `admin` dan password di Langkah 3.4.
+
+Isi dari file `repository.yaml`:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-microservices
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: https://github.com/Alvarras/microservices-on-k3s-cluster.git
+  name: microservices-on-k3s-cluster
+  # Jika repository bersifat Private (Privat di GitHub):
+  # username: Alvarras
+  # password: <GITHUB_PERSONAL_ACCESS_TOKEN_ghp_xxxx>
+```
 
 ---
 
-### Cara 2: Expose via Port-Forward (Alternatif)
-```bash
-# Jalankan port-forward di background pada dev-machine
-labctl ssh -m dev-machine $PLAY_ID -- \
-    "kubectl port-forward --address 0.0.0.0 -n argocd svc/argocd-server 8085:80 > /tmp/pf-argocd.log 2>&1 &"
+### Metode 2: Melalui Web UI ArgoCD (GUI)
 
-# Expose port 8085 ke publik
-labctl expose port $PLAY_ID 8085 --machine dev-machine --public
+1. Buka Web UI ArgoCD di browser Anda: [https://6af8199cfd7048c0a5ce1f69-710995.node-ap-c7ae.iximiuz.com/](https://6af8199cfd7048c0a5ce1f69-710995.node-ap-c7ae.iximiuz.com/)
+2. Login dengan `admin` dan password admin Anda.
+3. Klik menu **Settings** (ikon gerigi pada bilah navigasi kiri).
+4. Pilih **Repositories** -> Klik tombol **+ CONNECT REPO**.
+5. Isi formulir pendaftaran:
+   * **Choose connection method**: `VIA HTTPS`
+   * **Type**: `git`
+   * **Repository URL**: `https://github.com/Alvarras/microservices-on-k3s-cluster.git`
+   * *(Opsional)* Jika repo privat: isi **Username** (`Alvarras`) dan **Password** (GitHub Personal Access Token `ghp_...`).
+6. Klik tombol **CONNECT**.
+7. Status koneksi akan bertanda centang hijau: **`Successful`**.
+
+---
+
+### Metode 3: Melalui ArgoCD CLI
+
+```bash
+# Login terlebih dahulu
+argocd login 172.16.0.3:30085 --plaintext --username admin --password <PASSWORD>
+
+# Daftarkan repositori
+argocd repo add https://github.com/Alvarras/microservices-on-k3s-cluster.git
+
+# Verifikasi status repositori
+argocd repo list
+```
+
+Output yang diharapkan:
+```text
+TYPE  NAME                          REPO                                                          STATUS      MESSAGE
+git   microservices-on-k3s-cluster  https://github.com/Alvarras/microservices-on-k3s-cluster.git  Successful
 ```
 
 ---
 
 ## 5. Deployment Online Boutique via GitOps ArgoCD
 
-Setelah ArgoCD aktif, deploy Online Boutique dengan mendaftarkan manifest **[argocd/argocd-application.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/argocd-application.yaml)**:
+Setelah repository terhubung, deploy Online Boutique dengan mendaftarkan manifest **[argocd/argocd-application.yaml](file:///home/vrs/Projects/rancher/microservices-demo/argocd/argocd-application.yaml)**:
 
 ```bash
 kubectl apply -f argocd/argocd-application.yaml
 ```
 
 ArgoCD akan otomatis:
-1. Melakukan clone dari repositori `https://github.com/Alvarras/microservices-on-k3s-cluster.git`.
+1. Melakukan sync dari repositori `https://github.com/Alvarras/microservices-on-k3s-cluster.git`.
 2. Men-deploy Helm chart `./helm-chart` dengan nilai dari `values-k3s.yaml`.
 3. Menjalankan seluruh 11 microservices di namespace `default` pada kedua worker node.
 
 ---
 
-## 6. Panduan Expose Frontend Toko Online Boutique
+## 6. Panduan Akses Web UI ArgoCD & Expose
 
-### Expose via NodePort (Port 30080)
+### Akses Web UI ArgoCD (NodePort 30085)
+```bash
+labctl expose port $PLAY_ID 30085 --machine node-01 --public
+```
+
+* **URL Web UI (Live)**: [https://6af8199cfd7048c0a5ce1f69-710995.node-ap-c7ae.iximiuz.com/](https://6af8199cfd7048c0a5ce1f69-710995.node-ap-c7ae.iximiuz.com/)
+* **Username**: `admin`
+* **Password**: `G4FnzerxQe3Gbvh1`
+
+---
+
+### Expose Frontend Toko Online Boutique (NodePort 30080)
 ```bash
 # 1. Terapkan service NodePort frontend
 kubectl apply -f frontend-nodeport.yaml
@@ -213,13 +219,16 @@ helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace -f argoc
 # 3. Dapatkan initial admin password
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
 
-# 4. Expose ArgoCD UI (NodePort 30085)
+# 4. Daftarkan Repository Git
+kubectl apply -f argocd/repository.yaml
+
+# 5. Expose ArgoCD UI (NodePort 30085)
 labctl expose port $PLAY_ID 30085 --machine node-01 --public
 
-# 5. Deploy Online Boutique via GitOps
+# 6. Deploy Online Boutique via GitOps
 kubectl apply -f argocd/argocd-application.yaml
 
-# 6. Expose Online Boutique Frontend (NodePort 30080)
+# 7. Expose Online Boutique Frontend (NodePort 30080)
 kubectl apply -f frontend-nodeport.yaml
 labctl expose port $PLAY_ID 30080 --machine node-01 --public
 ```
